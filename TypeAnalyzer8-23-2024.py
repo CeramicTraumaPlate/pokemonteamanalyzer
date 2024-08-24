@@ -54,7 +54,9 @@ def calculate_team_matchups(team):
 
         # Count weaknesses, resistances, and immunities
         for type_name, effectiveness in type_effectiveness.items():
-            if effectiveness == 2.0:
+            if effectiveness == 4.0:  # Quadruple weakness
+                weaknesses[type_name] += 2
+            elif effectiveness == 2.0:
                 weaknesses[type_name] += 1
             elif effectiveness == 0.5:
                 resistances[type_name] += 1
@@ -77,30 +79,55 @@ def recommend_types_intelligently(weaknesses, resistances, immunities):
     if not most_vulnerable_types:
         return ["Your team has no major weaknesses. No additional types are necessary."]
 
-    # Dictionary to score types based on how much they cover vulnerabilities
-    type_scores = defaultdict(int)
+    # Dictionary to score single types
+    single_type_scores = defaultdict(int)
 
-    for type_name in type_chart_keys:
-        # Calculate how this type would mitigate existing weaknesses
-        resist_count = sum(1 for weak_type in most_vulnerable_types if type_name in type_chart[weak_type]['resist'])
-        immune_count = sum(1 for weak_type in most_vulnerable_types if type_name in type_chart[weak_type]['immune'])
-        new_weakness_count = sum(1 for poke_type in type_chart[type_name]['weak'] if net_weaknesses[poke_type] > 0)
+    # Dictionary to score dual types, using a set to track unique pairs
+    dual_type_scores = defaultdict(int)
+    dual_type_set = set()
 
-        # Score the type: prioritizing immunity, then resistance, and subtracting for new weaknesses
-        type_scores[type_name] = 2 * immune_count + resist_count - new_weakness_count
+    for type1 in type_chart_keys:
+        for type2 in type_chart_keys:
+            # Consider single types first
+            resist_count = sum(1 for weak_type in most_vulnerable_types if type1 in type_chart[weak_type]['resist'])
+            immune_count = sum(1 for weak_type in most_vulnerable_types if type1 in type_chart[weak_type]['immune'])
+            new_weakness_count = sum(1 for poke_type in type_chart[type1]['weak'] if net_weaknesses[poke_type] > 0)
 
-    # Sort types based on their score
-    sorted_type_scores = sorted(type_scores.items(), key=lambda x: x[1], reverse=True)
+            # Score the type: prioritizing immunity, then resistance, and subtracting for new weaknesses
+            single_type_scores[type1] = 2 * immune_count + resist_count - new_weakness_count
 
-    # Suggest top 3 types
+            # Now consider dual types
+            if type1 != type2:  # Avoid same type dual types
+                dual_resist_count = resist_count + sum(1 for weak_type in most_vulnerable_types if type2 in type_chart[weak_type]['resist'])
+                dual_immune_count = immune_count + sum(1 for weak_type in most_vulnerable_types if type2 in type_chart[weak_type]['immune'])
+                dual_new_weakness_count = new_weakness_count + sum(1 for poke_type in type_chart[type2]['weak'] if net_weaknesses[poke_type] > 0)
+
+                # Sort the pair to ensure uniqueness (e.g., (Fire, Ghost) is the same as (Ghost, Fire))
+                sorted_pair = tuple(sorted((type1, type2)))
+                if sorted_pair not in dual_type_set:
+                    dual_type_set.add(sorted_pair)
+                    dual_type_scores[sorted_pair] = 2 * dual_immune_count + dual_resist_count - dual_new_weakness_count
+
+    # Sort single and dual types based on their scores
+    sorted_single_type_scores = sorted(single_type_scores.items(), key=lambda x: x[1], reverse=True)
+    sorted_dual_type_scores = sorted(dual_type_scores.items(), key=lambda x: x[1], reverse=True)
+
+    # Suggest top 5 single and dual types
     recommendations = []
-    for type_name, score in sorted_type_scores[:3]:
+    
+    recommendations.append("Top 5 Single-Type Recommendations:")
+    for type_name, score in sorted_single_type_scores[:5]:
         if score > 0:
-            recommendations.append(f"Adding a {type_name} type Pokémon would mitigate {score} weaknesses.")
+            recommendations.append(f"{type_name}: mitigates {score} weaknesses")
+
+    recommendations.append("\nTop 5 Dual-Type Recommendations:")
+    for (type1, type2), score in sorted_dual_type_scores[:5]:
+        if score > 0:
+            recommendations.append(f"{type1}/{type2}: mitigates {score} weaknesses")
 
     # If no beneficial types were found, provide a fallback message
-    if not recommendations:
-        recommendations.append("No single type can greatly improve your team, consider dual-type Pokémon or coverage moves.")
+    if len(recommendations) == 2:  # Only headers, no recommendations
+        recommendations.append("No types found that can greatly improve your team. Consider coverage moves.")
 
     return recommendations
 
@@ -110,7 +137,8 @@ def rate_team(weaknesses, resistances, immunities):
     total_resistances = sum(resistances.values())
     total_immunities = sum(immunities.values())
 
-    # Calculate the net weakness score
+   
+  # Calculate the net weakness score
     net_weaknesses = total_weaknesses - total_resistances - total_immunities
 
     # Apply stricter rating criteria
@@ -128,7 +156,7 @@ def rate_team(weaknesses, resistances, immunities):
 # GUI code
 def create_gui():
     root = tk.Tk()
-    root.title("Pokémon Team Builder")
+    root.title("Pokemon Team Analyzer")
 
     types = sorted(type_chart.keys())
     immunities = sorted(type_chart.keys()) + [""]
@@ -137,17 +165,17 @@ def create_gui():
     team_vars = []
 
     for i in range(6):
-        tk.Label(root, text=f"Pokémon {i + 1} Type 1:").grid(row=i, column=0, padx=10, pady=5)
+        tk.Label(root, text=f"Pokemon {i + 1} Type 1:").grid(row=i, column=0, padx=10, pady=5)
         type1_var = tk.StringVar(value=blank_option)
         type1_menu = ttk.Combobox(root, textvariable=type1_var, values=[blank_option] + types)
         type1_menu.grid(row=i, column=1)
 
-        tk.Label(root, text=f"Pokémon {i + 1} Type 2:").grid(row=i, column=2, padx=10, pady=5)
+        tk.Label(root, text=f"Pokemon {i + 1} Type 2:").grid(row=i, column=2, padx=10, pady=5)
         type2_var = tk.StringVar(value=blank_option)
         type2_menu = ttk.Combobox(root, textvariable=type2_var, values=[blank_option] + types)
         type2_menu.grid(row=i, column=3)
 
-        tk.Label(root, text=f"Pokémon {i + 1} Immunities:").grid(row=i, column=4, padx=10, pady=5)
+        tk.Label(root, text=f"Pokemon {i + 1} Immunities:").grid(row=i, column=4, padx=10, pady=5)
         immunities_var = tk.StringVar(value=blank_option)
         immunities_menu = ttk.Combobox(root, textvariable=immunities_var, values=[blank_option] + immunities)
         immunities_menu.grid(row=i, column=5)
@@ -159,12 +187,18 @@ def create_gui():
         for type1_var, type2_var, immunities_var in team_vars:
             type1 = type1_var.get() or None
             type2 = type2_var.get() or None
+
+            # Check for duplicate types
+            if type1 and type2 and type1 == type2:
+                messagebox.showwarning("Warning", f"Pokemon with Type 1 as {type1} and Type 2 as {type2} are the same. Please choose different types.")
+                return
+
             specific_immunities = [immunities_var.get()] if immunities_var.get() and immunities_var.get() != blank_option else []
             if type1:
                 team.append((type1, type2, specific_immunities))
 
         if not team:
-            messagebox.showerror("Error", "Please select at least one Pokémon.")
+            messagebox.showerror("Error", "Please select at least one Pokemon.")
             return
 
         weaknesses, resistances, immunities = calculate_team_matchups(team)
