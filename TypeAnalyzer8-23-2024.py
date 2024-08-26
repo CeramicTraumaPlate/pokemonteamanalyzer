@@ -72,64 +72,88 @@ def recommend_types_intelligently(weaknesses, resistances, immunities):
     # Calculate net weaknesses by subtracting resistances and immunities from weaknesses
     net_weaknesses = {type_name: max(0, weaknesses[type_name] - resistances[type_name] - immunities[type_name]) for type_name in type_chart_keys}
 
-    # Identify types with the most pressing weaknesses
-    most_vulnerable_types = [type_name for type_name, count in net_weaknesses.items() if count > 0]
-
-    # If no vulnerabilities, no recommendation needed
-    if not most_vulnerable_types:
+    # Identify the most common weakness
+    common_weaknesses = {type_name: weaknesses[type_name] for type_name, count in net_weaknesses.items() if count > 0}
+    if not common_weaknesses:
         return ["Your team has no major weaknesses. No additional types are necessary."]
 
-    # Dictionary to score single types
-    single_type_scores = defaultdict(int)
+    most_common_weakness = max(common_weaknesses, key=common_weaknesses.get)
 
-    # Dictionary to score dual types, using a set to track unique pairs
-    dual_type_scores = defaultdict(int)
-    dual_type_set = set()
+    # Dictionary to score types based on how much they cover vulnerabilities, with priority to the most common weakness
+    type_scores = defaultdict(int)
 
-    for type1 in type_chart_keys:
-        for type2 in type_chart_keys:
-            # Consider single types first
-            resist_count = sum(1 for weak_type in most_vulnerable_types if type1 in type_chart[weak_type]['resist'])
-            immune_count = sum(1 for weak_type in most_vulnerable_types if type1 in type_chart[weak_type]['immune'])
-            new_weakness_count = sum(1 for poke_type in type_chart[type1]['weak'] if net_weaknesses[poke_type] > 0)
+    for type_name in type_chart_keys:
+        # Calculate how this type would mitigate the most common weakness
+        resist_common = most_common_weakness in type_chart[type_name]['resist']
+        immune_common = most_common_weakness in type_chart[type_name]['immune']
 
-            # Score the type: prioritizing immunity, then resistance, and subtracting for new weaknesses
-            single_type_scores[type1] = 2 * immune_count + resist_count - new_weakness_count
+        # Calculate how this type would mitigate other vulnerabilities
+        resist_count = sum(1 for weak_type in net_weaknesses if type_name in type_chart[weak_type]['resist'])
+        immune_count = sum(1 for weak_type in net_weaknesses if type_name in type_chart[weak_type]['immune'])
+        new_weakness_count = sum(1 for poke_type in type_chart[type_name]['weak'] if net_weaknesses[poke_type] > 0)
 
-            # Now consider dual types
-            if type1 != type2:  # Avoid same type dual types
-                dual_resist_count = resist_count + sum(1 for weak_type in most_vulnerable_types if type2 in type_chart[weak_type]['resist'])
-                dual_immune_count = immune_count + sum(1 for weak_type in most_vulnerable_types if type2 in type_chart[weak_type]['immune'])
-                dual_new_weakness_count = new_weakness_count + sum(1 for poke_type in type_chart[type2]['weak'] if net_weaknesses[poke_type] > 0)
+        # Skip types with no resistances and no useful immunities
+        if resist_count == 0 and immune_count == 0:
+            continue
 
-                # Sort the pair to ensure uniqueness (e.g., (Fire, Ghost) is the same as (Ghost, Fire))
-                sorted_pair = tuple(sorted((type1, type2)))
-                if sorted_pair not in dual_type_set:
-                    dual_type_set.add(sorted_pair)
-                    dual_type_scores[sorted_pair] = 2 * dual_immune_count + dual_resist_count - dual_new_weakness_count
+        # Score the type: prioritize the most common weakness coverage
+        type_scores[type_name] = 5 * immune_common + 3 * resist_common + immune_count + resist_count - new_weakness_count
 
-    # Sort single and dual types based on their scores
-    sorted_single_type_scores = sorted(single_type_scores.items(), key=lambda x: x[1], reverse=True)
-    sorted_dual_type_scores = sorted(dual_type_scores.items(), key=lambda x: x[1], reverse=True)
+    # Sort types based on their score
+    sorted_type_scores = sorted(type_scores.items(), key=lambda x: x[1], reverse=True)
 
-    # Suggest top 5 single and dual types
+    # Suggest top 5 types with sensible messages
     recommendations = []
-    
-    recommendations.append("Top 5 Single-Type Recommendations:")
-    for type_name, score in sorted_single_type_scores[:5]:
+    for type_name, score in sorted_type_scores[:5]:
         if score > 0:
-            recommendations.append(f"{type_name}: mitigates {score} weaknesses")
-
-    recommendations.append("\nTop 5 Dual-Type Recommendations:")
-    for (type1, type2), score in sorted_dual_type_scores[:5]:
-        if score > 0:
-            recommendations.append(f"{type1}/{type2}: mitigates {score} weaknesses")
+            # Calculate how many actual weaknesses this type mitigates
+            mitigated_weaknesses = sum(1 for weak_type in net_weaknesses if type_name in type_chart[weak_type]['resist'] or type_name in type_chart[weak_type]['immune'])
+            recommendations.append(f"Adding a {type_name} type Pokémon would mitigate {mitigated_weaknesses} weaknesses.")
 
     # If no beneficial types were found, provide a fallback message
-    if len(recommendations) == 2:  # Only headers, no recommendations
-        recommendations.append("No types found that can greatly improve your team. Consider coverage moves.")
+    if not recommendations:
+        recommendations.append("No single type can greatly improve your team, consider dual-type Pokémon or coverage moves.")
+
+    # Suggest top 5 dual-type combinations with sensible messages
+    dual_type_scores = defaultdict(int)
+    for type1 in type_chart_keys:
+        for type2 in type_chart_keys:
+            if type1 != type2 and (type2, type1) not in dual_type_scores:
+                # Calculate how this dual type would mitigate the most common weakness
+                resist_common = most_common_weakness in type_chart[type1]['resist'] or most_common_weakness in type_chart[type2]['resist']
+                immune_common = most_common_weakness in type_chart[type1]['immune'] or most_common_weakness in type_chart[type2]['immune']
+
+                # Calculate how this dual type would mitigate other vulnerabilities
+                resist_count = sum(1 for weak_type in net_weaknesses if type1 in type_chart[weak_type]['resist'] or type2 in type_chart[weak_type]['resist'])
+                immune_count = sum(1 for weak_type in net_weaknesses if type1 in type_chart[weak_type]['immune'] or type2 in type_chart[weak_type]['immune'])
+                new_weakness_count = sum(1 for poke_type in type_chart[type1]['weak'] + type_chart[type2]['weak'] if net_weaknesses[poke_type] > 0)
+
+                # Skip dual-types with no resistances and no useful immunities
+                if resist_count == 0 and immune_count == 0:
+                    continue
+
+                # Score the dual type: prioritize the most common weakness coverage
+                dual_type_scores[(type1, type2)] = 5 * immune_common + 3 * resist_common + immune_count + resist_count - new_weakness_count
+
+    # Sort dual-type scores based on their score
+    sorted_dual_type_scores = sorted(dual_type_scores.items(), key=lambda x: x[1], reverse=True)
+
+    # Suggest top 5 dual-type combinations with sensible messages
+    dual_recommendations = []
+    for (type1, type2), score in sorted_dual_type_scores[:5]:
+        if score > 0:
+            # Calculate how many actual weaknesses this dual type mitigates
+            mitigated_weaknesses = sum(1 for weak_type in net_weaknesses if type1 in type_chart[weak_type]['resist'] or type2 in type_chart[weak_type]['resist'] or type1 in type_chart[weak_type]['immune'] or type2 in type_chart[weak_type]['immune'])
+            dual_recommendations.append(f"Adding a {type1}/{type2} type Pokémon would mitigate {mitigated_weaknesses} weaknesses.")
+
+    if dual_recommendations:
+        recommendations.append("\nDual-Type Recommendations:\n" + "\n".join(dual_recommendations))
+    else:
+        recommendations.append("No dual-type Pokémon significantly improve your team.")
 
     return recommendations
+
+
 
 # Function to rate the team
 def rate_team(weaknesses, resistances, immunities):
