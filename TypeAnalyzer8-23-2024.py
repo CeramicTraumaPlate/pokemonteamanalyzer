@@ -119,14 +119,19 @@ def recommend_types_intelligently(weaknesses, resistances, immunities):
     for type1 in type_chart_keys:
         for type2 in type_chart_keys:
             if type1 != type2 and (type2, type1) not in dual_type_scores:
-                # Calculate how this dual type would mitigate the most common weakness
-                resist_common = most_common_weakness in type_chart[type1]['resist'] or most_common_weakness in type_chart[type2]['resist']
-                immune_common = most_common_weakness in type_chart[type1]['immune'] or most_common_weakness in type_chart[type2]['immune']
+                # Calculate combined resistances, weaknesses, and immunities
+                combined_resistances = set(type_chart[type1]['resist']) | set(type_chart[type2]['resist'])
+                combined_immunities = set(type_chart[type1]['immune']) | set(type_chart[type2]['immune'])
+                combined_weaknesses = set(type_chart[type1]['weak']) | set(type_chart[type2]['weak'])
+
+                # Mitigation for the most common weakness
+                resist_common = most_common_weakness in combined_resistances
+                immune_common = most_common_weakness in combined_immunities
 
                 # Calculate how this dual type would mitigate other vulnerabilities
-                resist_count = sum(1 for weak_type in net_weaknesses if type1 in type_chart[weak_type]['resist'] or type2 in type_chart[weak_type]['resist'])
-                immune_count = sum(1 for weak_type in net_weaknesses if type1 in type_chart[weak_type]['immune'] or type2 in type_chart[weak_type]['immune'])
-                new_weakness_count = sum(1 for poke_type in type_chart[type1]['weak'] + type_chart[type2]['weak'] if net_weaknesses[poke_type] > 0)
+                resist_count = sum(1 for weak_type in net_weaknesses if weak_type in combined_resistances)
+                immune_count = sum(1 for weak_type in net_weaknesses if weak_type in combined_immunities)
+                new_weakness_count = sum(1 for poke_type in combined_weaknesses if net_weaknesses[poke_type] > 0)
 
                 # Skip dual-types with no resistances and no useful immunities
                 if resist_count == 0 and immune_count == 0:
@@ -143,7 +148,7 @@ def recommend_types_intelligently(weaknesses, resistances, immunities):
     for (type1, type2), score in sorted_dual_type_scores[:5]:
         if score > 0:
             # Calculate how many actual weaknesses this dual type mitigates
-            mitigated_weaknesses = sum(1 for weak_type in net_weaknesses if type1 in type_chart[weak_type]['resist'] or type2 in type_chart[weak_type]['resist'] or type1 in type_chart[weak_type]['immune'] or type2 in type_chart[weak_type]['immune'])
+            mitigated_weaknesses = sum(1 for weak_type in net_weaknesses if weak_type in set(type_chart[type1]['resist']) | set(type_chart[type2]['resist']) or weak_type in set(type_chart[type1]['immune']) | set(type_chart[type2]['immune']))
             dual_recommendations.append(f"Adding a {type1}/{type2} type Pokémon would mitigate {mitigated_weaknesses} weaknesses.")
 
     if dual_recommendations:
